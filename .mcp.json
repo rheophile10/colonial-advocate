@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "colonial-advocate": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "mcp",
+        "python",
+        "server.py"
+      ]
+    }
+  }
+}
