@@ -1,61 +1,26 @@
 import { createInitialState } from "../../../plastron/plastron/src/index.js";
-import { installDom, el, type VNode } from "../../../plastron/segments/plastron-dom/src/index.js";
-import type { Fn, LambdaKey, Segment } from "../../../plastron/plastron/src/types/index.js";
+import { installDom } from "../../../plastron/segments/plastron-dom/src/index.js";
+import type { Fn } from "../../../plastron/plastron/src/types/index.js";
+import { buildArticlesSegment, type Article } from "./segments/articles.js";
 
 // ========================================================================
-// The Colonial Advocate — coming-soon shell.
+// The Colonial Advocate — entry.
 //
-// One segment, one tree cel. The render lambda paints The Chase and a
-// "coming soon" banner. As we grow this into a real paper we'll add
-// segments per section (editorial, news, the family-compact watch),
-// each lazy-loaded the way plastron-spa-demo does it.
+// Hydrates the articles segment with an empty list, mounts the DOM,
+// then fetches /articles.json and writes the result onto the
+// `articles` cel. The render lambda re-runs on the cycle and the
+// painter applies the diff. If the fetch fails we leave the empty
+// state visible (renders the "press is warming" placeholder).
 // ========================================================================
-
-const renderHome: Fn = (): VNode =>
-  el("div", { class: "advocate" },
-    el("header", { class: "masthead" },
-      el("p", { class: "vol" }, "Vol. I — No. 1"),
-      el("h1", { class: "title" }, "The Colonial Advocate"),
-      el("p", { class: "motto" },
-        "Pledged but to truth, to liberty, and law — no favour sways us, and no fear shall awe."),
-    ),
-    el("main", { class: "front" },
-      el("figure", { class: "chase" },
-        el("img", {
-          src: `${import.meta.env.BASE_URL}the-chase.png`,
-          alt: "The Chase — a coach pursued by riders",
-        }),
-        el("figcaption", null, "The Chase."),
-      ),
-      el("section", { class: "coming-soon" },
-        el("h2", null, "Coming Soon."),
-        el("p", null,
-          "A new edition of Mackenzie's old paper, dressed for the present hour — soon to publish."),
-      ),
-    ),
-    el("footer", { class: "colophon" },
-      el("p", null, "Toronto. Re-established by friends of the press."),
-    ),
-  );
-
-const home: Segment = {
-  key: "home",
-  cels: [
-    {
-      key: "appTree",
-      l: "home:render",
-      inputMap: {},
-      segment: "home",
-    },
-  ],
-};
-const homeFns = new Map<LambdaKey, Fn>([["home:render", renderHome]]);
 
 const state = createInitialState();
 const hydrate = state.fns.get("hydrate") as Fn;
 const runCycle = state.fns.get("runCycle") as Fn;
+const setFn = state.fns.get("set") as Fn;
 
-hydrate(state, [home], [homeFns]);
+const articlesBundle = buildArticlesSegment();
+hydrate(state, [articlesBundle.segment], [articlesBundle.fns]);
+
 await runCycle(state);
 
 const handle = installDom(state, {
@@ -65,4 +30,20 @@ const handle = installDom(state, {
 await runCycle(state);
 handle.painter.flushNow();
 
-console.log("[colonial-advocate] mounted");
+// Fetch articles.json off the critical path. If the file is missing
+// or malformed, the empty state stays up.
+try {
+  const url = `${import.meta.env.BASE_URL}articles.json`;
+  const res = await fetch(url, { cache: "no-cache" });
+  if (!res.ok) throw new Error(`articles.json: ${res.status}`);
+  const articles = (await res.json()) as Article[];
+  if (!Array.isArray(articles)) throw new Error("articles.json is not an array");
+  await setFn(state, "articles", articles);
+  await runCycle(state);
+  handle.painter.flushNow();
+  console.log(`[colonial-advocate] loaded ${articles.length} article(s)`);
+} catch (err) {
+  console.error("[colonial-advocate] failed to load articles", err);
+}
+
+(globalThis as { __plastronState?: unknown }).__plastronState = state;

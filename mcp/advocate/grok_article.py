@@ -1,19 +1,27 @@
 """Generate an article in the voice of William Lyon Mackenzie via Grok.
 
-The system prompt fixes the voice; the user prompt is the contemporary
-matter to be lashed. Returns the article text. Errors raise — the MCP
-client will surface them.
+Two modes:
+- Editor-driven: caller passes `matter` and Grok writes about that.
+- Editor-absent: caller passes `matter=None` and Grok uses xAI's
+  live search to surface a current Canadian-political matter that
+  W.L.M. would have wanted to lash, then writes the piece.
+
+Output is structured JSON ({headline, deck, body, dateline,
+source_topic}), enforced via Grok's `response_format`. The
+publish-tool relies on this shape to slot pieces into articles.json.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
+from typing import Any
 
 import httpx
 
 from ._common import get_grok_api_key, mcp
 
-GROK_ENDPOINT = "https://api.x.ai/v1/chat/completions"
-DEFAULT_MODEL = "grok-4-1-fast-non-reasoning"
+GROK_ENDPOINT = "https://api.x.ai/v1/responses"
+DEFAULT_MODEL = "grok-4.3"
 
 WLM_SYSTEM_PROMPT = """\
 You are William Lyon Mackenzie — Scots-Canadian printer, agitator,
@@ -59,81 +67,169 @@ PURPOSE OF EVERY ARTICLE
   the party bagman — must finish the article uneasy in his chair.
   The reader of the people must finish it standing.
 
-FORM
-- Provide a HEADLINE in small-caps style (ALL CAPS is fine).
-- Optionally a deck (one-line summary, italics implied).
-- Then 4–8 paragraphs of body. No modern editorial throat-clearing
-  ("In today's piece..."), no bullet lists, no headings inside the
-  body. This is a 19th-century broadsheet column.
-- Sign off: **— W. L. M.**
+OUTPUT FORMAT
+Return ONLY valid JSON with these fields, nothing else:
+  {
+    "headline":     "ALL-CAPS HEADLINE — short, percussive",
+    "deck":         "one-line italic-style summary, sentence case, no period at end",
+    "body":         "4-8 paragraphs of WLM-voice prose, separated by \\n\\n. NO headline inside. NO sign-off — the typesetter sets that.",
+    "dateline":     "TORONTO, May 7. — (or wherever the matter belongs)",
+    "source_topic": "one short sentence naming the contemporary event/file you are lashing"
+  }
 
 CONSTRAINTS
-- Stay factually anchored to the matter the editor gives you.
-  Polemic, yes; fabrication of events, no. If you don't know a
-  detail, generalise rather than invent.
-- Do NOT break character. Do NOT add a meta note explaining the
-  voice. The article IS the output.
+- Stay factually anchored. Polemic, yes; fabrication of events, no.
+  If you don't know a detail, generalise rather than invent.
+- Do NOT break character. Do NOT include any meta note explaining the
+  voice. The article IS the output, packaged as JSON.
 """
+
+
+def _user_prompt(matter: str | None, length: str) -> str:
+    word_targets = {"short": 250, "medium": 500, "long": 900}
+    target = word_targets.get(length, 500)
+
+    if matter:
+        return (
+            f"MATTER FOR THE NEXT EDITION:\n{matter}\n\n"
+            f"Length: about {target} words for the body. "
+            f"Return the JSON shape demanded by your system prompt."
+        )
+    return (
+        "There is no editor's brief for this edition; you choose the "
+        "matter. Use live search over current Canadian news (federal "
+        "and provincial — Ottawa, Queen's Park, the bank boards, the "
+        "regulators). Choose the matter that would most have provoked "
+        "W. L. M. to fire up his press: oligarchy, monopoly, patronage, "
+        "betrayal of the franchise, judicial cronyism, paid-for press, "
+        "land or housing speculation, bank cartels, regulator-revolvers, "
+        "treaty violations against Indigenous nations. Pick ONE matter "
+        "— specific, recent, named — and lash it.\n\n"
+        f"Length: about {target} words for the body. "
+        "Return the JSON shape demanded by your system prompt; "
+        "`source_topic` should name the event you chose."
+    )
+
+
+def _today_iso() -> str:
+    return _dt.date.today().isoformat()
+
+
+def _call_grok(matter: str | None, length: str, model: str) -> dict[str, Any]:
+    # /v1/responses takes `input` as either a string or a list of
+    # message objects. We use the list form so the WLM voice prompt
+    # rides as system content.
+    payload: dict[str, Any] = {
+        "model": model,
+        "input": [
+            {"role": "system", "content": WLM_SYSTEM_PROMPT},
+            {"role": "user", "content": _user_prompt(matter, length)},
+        ],
+        "temperature": 0.9,
+    }
+
+    # When matter is None, Grok must look at current news to pick the
+    # editor's matter. The new Agent Tools API (the chat/completions
+    # `search_parameters` block was 410'd in May 2026) exposes
+    # web_search as a built-in tool; xAI runs it server-side.
+    if matter is None:
+        payload["tools"] = [{"type": "web_search", "web_search": {}}]
+
+    headers = {
+        "Authorization": f"Bearer {get_grok_api_key()}",
+        "Content-Type": "application/json",
+    }
+
+    with httpx.Client(timeout=180.0) as client:
+        r = client.post(GROK_ENDPOINT, headers=headers, json=payload)
+        if r.status_code != 200:
+            raise RuntimeError(f"Grok API {r.status_code}: {r.text[:800]}")
+        return r.json()
+
+
+def _extract_output_text(resp: dict[str, Any]) -> str:
+    """Pull the assistant's final output_text out of /v1/responses shape.
+
+    The response has an `output` array; the assistant message item has
+    a `content` array whose entries include one with type "output_text".
+    Earlier items may be tool calls (web_search), which we skip.
+    """
+    for item in resp.get("output", []):
+        if item.get("role") == "assistant" or item.get("type") == "message":
+            for piece in item.get("content", []):
+                if piece.get("type") in ("output_text", "text"):
+                    text = piece.get("text")
+                    if isinstance(text, str) and text.strip():
+                        return text
+    if isinstance(resp.get("output_text"), str):
+        return resp["output_text"]
+    raise RuntimeError(
+        f"Could not find output_text in response. First 800 chars:\n"
+        f"{json.dumps(resp)[:800]}"
+    )
+
+
+def _strip_fence(text: str) -> str:
+    """Tolerate ```json … ``` wrappers around the JSON body."""
+    s = text.strip()
+    if s.startswith("```"):
+        s = s.split("\n", 1)[1] if "\n" in s else s
+        if s.endswith("```"):
+            s = s[: -3]
+    return s.strip()
+
+
+def _parse(resp: dict[str, Any]) -> dict[str, Any]:
+    content = _extract_output_text(resp)
+    try:
+        article = json.loads(_strip_fence(content))
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Grok did not return valid JSON. First 500 chars:\n{content[:500]}"
+        ) from e
+
+    for key in ("headline", "deck", "body"):
+        if not isinstance(article.get(key), str) or not article[key].strip():
+            raise RuntimeError(
+                f"Grok JSON missing/empty required field {key!r}. Got: {article}"
+            )
+    article.setdefault("dateline", f"TORONTO, {_dt.date.today().strftime('%B %-d')}.")
+    article.setdefault("source_topic", "")
+
+    citations = (resp.get("citations") or [])
+    if citations:
+        article["citations"] = citations
+
+    return article
 
 
 @mcp.tool()
 def write_article(
-    matter: str,
+    matter: str | None = None,
     length: str = "medium",
     model: str = DEFAULT_MODEL,
-) -> str:
+) -> dict[str, Any]:
     """Write an article for *The Colonial Advocate* in W. L. Mackenzie's voice.
 
-    The article's purpose is to put fear into the Family Compact and their
-    modern heirs (oligarchs, party insiders, regulators-turned-lobbyists,
-    bank cartels) on the matter at hand. Voice is biblical-cadenced,
-    pamphleteering, name-the-rascals 1820s reform journalism.
+    The article's purpose is fixed: put fear into the Family Compact
+    and their modern heirs (oligarchs, party insiders, regulators-
+    turned-lobbyists, bank cartels) on the matter at hand. Voice is
+    biblical-cadenced, pamphleteering, name-the-rascals 1820s reform
+    journalism.
 
     Args:
-        matter: The contemporary Canadian-political event or topic to
-            be lashed. Be specific — names, dates, dossiers help. e.g.
-            "the Greenbelt land swaps in Ontario, June 2023" or
-            "ArriveCAN contracting and the GC Strategies affair".
+        matter: The contemporary matter to be lashed. Be specific —
+            names, dates, dossier details. Examples: "Greenbelt land
+            swaps in Ontario, June 2023" or "ArriveCAN contracting
+            and the GC Strategies affair". If omitted, Grok will use
+            live search over current Canadian news to pick the matter
+            itself — choosing whichever recent file W.L.M. would most
+            have wanted to lash.
         length: "short" (~250 words), "medium" (~500), or "long" (~900).
         model: Grok model name. Defaults to grok-4-1-fast-non-reasoning.
 
     Returns:
-        The headline + body, ready to set into type.
+        dict with keys: headline, deck, body, dateline, source_topic
+        (and `citations` when live search ran).
     """
-    word_targets = {"short": 250, "medium": 500, "long": 900}
-    target = word_targets.get(length, 500)
-
-    user_prompt = (
-        f"MATTER FOR THE NEXT EDITION:\n{matter}\n\n"
-        f"Length: about {target} words for the body. "
-        f"Remember: headline, optional deck, body, signed — W. L. M."
-    )
-
-    api_key = get_grok_api_key()
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": WLM_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": 0.9,
-    }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
-    with httpx.Client(timeout=120.0) as client:
-        r = client.post(GROK_ENDPOINT, headers=headers, json=payload)
-        if r.status_code != 200:
-            raise RuntimeError(
-                f"Grok API {r.status_code}: {r.text[:500]}"
-            )
-        data = r.json()
-
-    try:
-        return data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError) as e:
-        raise RuntimeError(
-            f"Unexpected Grok response shape: {json.dumps(data)[:500]}"
-        ) from e
+    return _parse(_call_grok(matter, length, model))
