@@ -53,11 +53,24 @@ const renderParagraph = (text: string, isFirst: boolean): VNode =>
 const renderArticleBody = (body: string): VNode[] =>
   paragraphs(body).map((p, i) => renderParagraph(p, i === 0));
 
+const chaseFigure = (): VNode =>
+  el(
+    "figure",
+    { class: "chase" },
+    el("img", {
+      src: `${baseUrl()}the-chase.png`,
+      alt: "The Chase — a coach pursued by riders",
+    }),
+    el("figcaption", null, "The Chase."),
+  );
+
 const renderArticle = (a: Article, opts: { lead?: boolean } = {}): VNode => {
   const headerChildren: VNode[] = [el("h2", { class: "headline" }, a.headline)];
   if (a.deck) headerChildren.push(el("p", { class: "deck" }, a.deck));
 
   const bodyChildren: VNode[] = [];
+  // The Chase floats inside the lead piece so prose wraps it.
+  if (opts.lead) bodyChildren.push(chaseFigure());
   if (a.dateline) bodyChildren.push(el("span", { class: "dateline" }, a.dateline + " "));
   bodyChildren.push(...renderArticleBody(a.body));
 
@@ -138,23 +151,7 @@ const renderFront = (articles: Article[]): VNode => {
   if (articles.length === 0) return renderEmptyFront();
   const [lead, ...rest] = articles;
 
-  const blocks: VNode[] = [
-    // Lead block: The Chase + lead piece, side by side
-    el(
-      "section",
-      { class: "lead-block" },
-      el(
-        "figure",
-        { class: "chase" },
-        el("img", {
-          src: `${baseUrl()}the-chase.png`,
-          alt: "The Chase — a coach pursued by riders",
-        }),
-        el("figcaption", null, "The Chase."),
-      ),
-      renderArticle(lead, { lead: true }),
-    ),
-  ];
+  const blocks: VNode[] = [renderArticle(lead, { lead: true })];
   if (rest.length > 0) {
     blocks.push(
       el(

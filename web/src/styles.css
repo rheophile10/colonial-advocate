@@ -91,19 +91,31 @@ header.masthead .motto {
   color: var(--muted);
 }
 
-/* ─── lead block: image + lead piece ─────────────────────────────── */
+/* ─── lead piece + The Chase (floated, text wraps) ───────────────── */
 
-section.lead-block {
-  display: grid;
-  grid-template-columns: 1fr 1.4fr;
-  gap: var(--column-gap);
+article.piece.lead {
   padding-bottom: 24px;
   border-bottom: 1px solid var(--rule);
   margin-bottom: 24px;
 }
 
+/* The Chase sits inside the lead article body and floats left so the
+   prose wraps it the way a broadsheet sets a cut beside a column. */
+article.piece.lead figure.chase {
+  float: left;
+  width: 42%;
+  max-width: 360px;
+  margin: 4px 22px 12px 0;
+  shape-outside: margin-box;
+}
+
 @media (max-width: 700px) {
-  section.lead-block { grid-template-columns: 1fr; }
+  article.piece.lead figure.chase {
+    float: none;
+    width: 100%;
+    max-width: 100%;
+    margin: 0 0 16px 0;
+  }
 }
 
 figure.chase {
@@ -113,7 +125,6 @@ figure.chase {
   background: var(--paper-2);
   padding: 12px 12px 8px;
   box-shadow: 0 2px 0 rgba(0,0,0,0.05);
-  align-self: start;
 }
 
 figure.chase img {
@@ -129,6 +140,14 @@ figure.chase figcaption {
   letter-spacing: 0.18em;
   font-size: 0.8rem;
   color: var(--muted);
+}
+
+/* Clear the float at the end of the lead piece so the byline + the
+   columns section below don't ride up alongside the image. */
+article.piece.lead .body::after {
+  content: "";
+  display: block;
+  clear: both;
 }
 
 /* ─── article piece ──────────────────────────────────────────────── */
