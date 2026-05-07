@@ -1,0 +1,33 @@
+# --- env / secrets -----------------------------------------------------
+.env
+.env.*
+*.env
+!.env.example
+
+# --- node --------------------------------------------------------------
+node_modules/
+dist/
+.vite/
+*.log
+npm-debug.log*
+
+# --- python ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.uv/
+uv.lock
+
+# --- editors / OS ------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# VS Code: keep launch.json + extensions.json checked in, ignore the rest
+.vscode/*
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/settings.json

@@ -1,0 +1,38 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Vite: dev server",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "${workspaceFolder}/web",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Chrome: open localhost:5173",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/web",
+      "preLaunchTask": "vite-dev"
+    },
+    {
+      "name": "MCP: colonial-mcp (uv)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/mcp/server.py",
+      "cwd": "${workspaceFolder}/mcp",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Web: dev + browser",
+      "configurations": ["Vite: dev server", "Chrome: open localhost:5173"]
+    }
+  ]
+}

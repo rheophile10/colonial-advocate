@@ -1,0 +1,9 @@
+{
+  "typescript.tsdk": "web/node_modules/typescript/lib",
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/__pycache__": true,
+    "**/.venv": true
+  },
+  "python.analysis.extraPaths": ["mcp"]
+}
