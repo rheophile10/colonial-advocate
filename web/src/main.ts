@@ -22,7 +22,7 @@ const renderHome: Fn = (): VNode =>
     el("main", { class: "front" },
       el("figure", { class: "chase" },
         el("img", {
-          src: "/the-chase.png",
+          src: `${import.meta.env.BASE_URL}the-chase.png`,
           alt: "The Chase — a coach pursued by riders",
         }),
         el("figcaption", null, "The Chase."),
