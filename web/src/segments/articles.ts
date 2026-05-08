@@ -22,6 +22,13 @@ export interface Article {
   slug: string;
   /** Small-caps red kicker above the headline (optional). */
   kicker?: string;
+  /** Issue label, e.g. "Vol. II — No. 20". The masthead reads this
+   *  off the newest article in the corpus. */
+  volume?: string;
+  /** Formal issue date, e.g. "York, Upper Canada — The Seventh of
+   *  May, in the Year 2026". The masthead reads this off the newest
+   *  article. */
+  issue_date?: string;
   headline: string;
   deck: string;
   /** Body markup, paragraphs separated by blank lines. Recognised
@@ -164,15 +171,21 @@ const ORDINALS = [
   "Twenty-Eighth", "Twenty-Ninth", "Thirtieth", "Thirty-First",
 ] as const;
 
-const todayFormal = (): string => {
-  const d = new Date();
-  const day = ORDINALS[d.getDate() - 1] ?? String(d.getDate());
-  const month = d.toLocaleString("en-CA", { month: "long" });
-  return `The ${day} of ${month}, in the Year ${d.getFullYear()}`;
+const formalDate = (iso: string | undefined): string => {
+  // Parse the date in UTC to avoid TZ flipping the day at the boundary.
+  const d = iso ? new Date(iso) : new Date();
+  const day = ORDINALS[d.getUTCDate() - 1] ?? String(d.getUTCDate());
+  const month = new Intl.DateTimeFormat("en-CA", {
+    month: "long", timeZone: "UTC",
+  }).format(d);
+  return `The ${day} of ${month}, in the Year ${d.getUTCFullYear()}`;
 };
 
-const masthead = (): VNode =>
-  el(
+const masthead = (lead: Article | undefined): VNode => {
+  const volume = lead?.volume ?? "Vol. II — No. 1";
+  const issueDate =
+    lead?.issue_date ?? `York, Upper Canada — ${formalDate(lead?.published_at)}`;
+  return el(
     "header",
     { class: "masthead" },
     el("h1", { class: "title" }, "The Colonial Advocate"),
@@ -184,11 +197,12 @@ const masthead = (): VNode =>
     el(
       "p",
       { class: "vol" },
-      el("span", null, "Vol. II — No. 21"),
-      el("span", null, `York, Upper Canada — ${todayFormal()}`),
+      el("span", null, volume),
+      el("span", null, issueDate),
       el("span", null, "Price: Four Pence"),
     ),
   );
+};
 
 const colophon = (): VNode =>
   el(
@@ -253,7 +267,7 @@ const renderHome: Fn = ({ articles }: { articles: Article[] }): VNode => {
     el(
       "div",
       { class: "advocate" },
-      masthead(),
+      masthead(safe[0]),
       renderFront(safe),
       colophon(),
     ),
