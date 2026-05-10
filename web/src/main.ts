@@ -28,7 +28,7 @@ const handle = installDom(state, {
 });
 
 await runCycle(state);
-handle.painter.flushNow();
+handle.channel.drain();
 
 // Fetch articles.json off the critical path. If the file is missing
 // or malformed, the empty state stays up.
@@ -40,7 +40,7 @@ try {
   if (!Array.isArray(articles)) throw new Error("articles.json is not an array");
   await setFn(state, "articles", articles);
   await runCycle(state);
-  handle.painter.flushNow();
+  handle.channel.drain();
   console.log(`[colonial-advocate] loaded ${articles.length} article(s)`);
 } catch (err) {
   console.error("[colonial-advocate] failed to load articles", err);
